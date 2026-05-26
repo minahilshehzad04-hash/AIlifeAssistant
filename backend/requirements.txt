@@ -2,3 +2,6 @@ fastapi
 uvicorn
 python-dotenv
 supabase
+pydantic-settings
+langchain-google-genai
+langchain-core
