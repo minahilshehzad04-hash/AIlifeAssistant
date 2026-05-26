@@ -33,7 +33,7 @@ export default async function DashboardOverview() {
         </div>
         
         <div className="space-y-3 relative z-10">
-          {suggestions.map((suggestion, i) => (
+          {suggestions.map((suggestion: string, i: number) => (
             <div key={i} className="flex items-start gap-3 text-indigo-200/80">
               <div className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
               <p>{suggestion}</p>
