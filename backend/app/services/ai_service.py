@@ -30,6 +30,67 @@ class AIService:
     def _embed(self, text: str) -> list[float]:
         return self.embeddings.embed_query(text)
 
+    def _python_hybrid_search_fallback(self, user_id: str, query: str, query_vector: list[float], k: int = 8) -> list:
+        """
+        Pure Python fallback for the hybrid search when the database stored procedure is missing.
+        """
+        try:
+            # 1. Fetch all memory embeddings for the user
+            result = self.supabase.table("memory_embeddings").select("*").eq("user_id", user_id).execute()
+            if not result.data:
+                return []
+            
+            # Helper for cosine similarity
+            import math
+            def cosine_similarity(v1, v2):
+                dot_product = sum(x * y for x, y in zip(v1, v2))
+                magnitude1 = math.sqrt(sum(x * x for x in v1))
+                magnitude2 = math.sqrt(sum(x * x for x in v2))
+                if magnitude1 == 0 or magnitude2 == 0:
+                    return 0.0
+                return dot_product / (magnitude1 * magnitude2)
+            
+            # 2. Score each memory
+            scored_memories = []
+            query_words = set(query.lower().split())
+            
+            for row in result.data:
+                # Parse embedding
+                row_emb = row.get("embedding")
+                if isinstance(row_emb, str):
+                    try:
+                        row_emb = json.loads(row_emb)
+                    except:
+                        if row_emb.startswith('[') and row_emb.endswith(']'):
+                            row_emb = [float(x) for x in row_emb[1:-1].split(',')]
+                        else:
+                            row_emb = None
+                
+                sim_score = 0.0
+                if row_emb and isinstance(row_emb, list):
+                    sim_score = cosine_similarity(query_vector, row_emb)
+                
+                # Keyword matching score
+                content = row.get("content", "")
+                content_words = set(content.lower().split())
+                word_intersection = query_words.intersection(content_words)
+                
+                keyword_score = 0.0
+                if query_words:
+                    keyword_score = len(word_intersection) / len(query_words)
+                
+                # Combine scores (70% semantic similarity + 30% exact keyword match)
+                combined_score = sim_score * 0.7 + keyword_score * 0.3
+                
+                scored_memories.append((combined_score, row))
+            
+            # 3. Sort and pick top k
+            scored_memories.sort(key=lambda x: x[0], reverse=True)
+            return [item[1] for item in scored_memories[:k]]
+        except Exception as fallback_err:
+            print(f"Python Fallback Search Error: {fallback_err}")
+            return []
+
     def _hybrid_search(self, user_id: str, query: str, k: int = 8) -> str:
         """
         Performs Hybrid Search:
@@ -39,21 +100,28 @@ class AIService:
         """
         try:
             query_vector = self._embed(query)
-            result = self.supabase.rpc(
-                "hybrid_search",
-                {
-                    "query_text": query,
-                    "query_embedding": query_vector,
-                    "user_id_filter": user_id,
-                    "match_count": k
-                }
-            ).execute()
+            rows = []
+            try:
+                result = self.supabase.rpc(
+                    "hybrid_search",
+                    {
+                        "query_text": query,
+                        "query_embedding": query_vector,
+                        "user_id_filter": user_id,
+                        "match_count": k
+                    }
+                ).execute()
+                rows = result.data or []
+            except Exception as e:
+                print(f"Hybrid Search RPC failed, using Python fallback. Error: {e}")
+                rows = self._python_hybrid_search_fallback(user_id, query, query_vector, k)
             
-            if result.data:
+            if rows:
                 # Format memories with their metadata for better AI understanding
                 memories = []
-                for row in result.data:
-                    mtype = row["metadata"].get("source_type", "memory")
+                for row in rows:
+                    metadata = row.get("metadata") or {}
+                    mtype = metadata.get("source_type", "memory")
                     memories.append(f"[{mtype.upper()}]: {row['content']}")
                 
                 # Memory Summarization logic: If we have too many memories, summarize them
@@ -64,6 +132,7 @@ class AIService:
         except Exception as e:
             print(f"Hybrid Search Error: {e}")
         return "No prior context available."
+
 
     def _summarize_memories(self, memories: list[str]) -> str:
         """Condenses multiple memories into a concise summary to save context space."""
