@@ -2,11 +2,26 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
+
+async function getApiUrl() {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL
+  }
+  if (process.env.NODE_ENV === 'development') {
+    return 'http://127.0.0.1:8000'
+  }
+  const headersList = await headers()
+  const host = headersList.get('host') || 'localhost:3000'
+  const protocol = host.includes('localhost') ? 'http' : 'https'
+  return `${protocol}://${host}/_/backend`
+}
 
 // --- RAG INGESTION HELPER ---
 async function ingestToRAG(userId: string, textContent: string, sourceType: string, sourceId: string) {
   try {
-    await fetch('http://127.0.0.1:8000/api/ingest', {
+    const apiUrl = await getApiUrl()
+    await fetch(`${apiUrl}/api/ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -148,7 +163,8 @@ export async function getDailyBrief() {
   if (!user) return ['Review your pending tasks.', 'Organize your notes.']
 
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/analyze', {
+    const apiUrl = await getApiUrl()
+    const response = await fetch(`${apiUrl}/api/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -177,7 +193,8 @@ export async function sendChatMessage(message: string) {
   if (!user) throw new Error("Not authenticated")
 
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/chat', {
+    const apiUrl = await getApiUrl()
+    const response = await fetch(`${apiUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
