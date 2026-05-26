@@ -49,9 +49,13 @@ export async function logout() {
 export async function signInWithOAuth(provider: 'google' | 'github') {
   const supabase = await createClient()
   // Assuming the app runs on localhost:3000 locally. In production, use env var.
-  const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL 
-    ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
-    : 'http://localhost:3000/auth/callback'
+  let siteUrl = 'http://localhost:3000'
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  } else if (process.env.VERCEL_URL) {
+    siteUrl = `https://${process.env.VERCEL_URL}`
+  }
+  const redirectUrl = `${siteUrl}/auth/callback`
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
